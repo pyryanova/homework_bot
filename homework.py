@@ -2,11 +2,13 @@ import logging
 import os
 import sys
 import time
+from contextlib import suppress
 from http import HTTPStatus
 
 import requests
 from dotenv import load_dotenv
 from telebot import TeleBot
+from telebot.apihelper import ApiException
 
 from exceptions import ResponseCodeError
 
@@ -53,9 +55,7 @@ def check_tokens():
         ) if not token
     ]
     if missing:
-        logger.critical(
-            f'Отсутствуют переменные окружения: {", ".join(missing)}'
-        )
+        logger.critical(f'Отсутствуют переменные окружения: {", ".join(missing)}')
         sys.exit(1)
 
 
@@ -64,10 +64,9 @@ def send_message(bot, message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
         logger.debug(f'Бот отправил сообщение: {message}')
-        return True
-    except Exception as error:
+    except ApiException as error:
         logger.error(f'Ошибка при отправке сообщения в Telegram: {error}')
-        return False
+        raise
 
 
 def get_api_answer(timestamp):
@@ -75,15 +74,15 @@ def get_api_answer(timestamp):
     params = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except requests.exceptions.RequestException as error:
-        raise ConnectionError(f'Ошибка запроса к API: {error}')
-    if response.status_code != HTTPStatus.OK:
-        raise ResponseCodeError(
-            response.status_code,
-            response.reason,
-            response.text
-        )
-    return response.json()
+        if response.status_code != HTTPStatus.OK:
+            raise ResponseCodeError(
+                response.status_code,
+                response.reason,
+                response.text
+            )
+        return response.json()
+    except (requests.exceptions.RequestException, ValueError) as error:
+        raise ConnectionError(f'Ошибка при обращении к API: {error}')
 
 
 def check_response(response):
@@ -133,7 +132,7 @@ def main():
     """Основная логика работы бота."""
     check_tokens()
     bot = TeleBot(token=TELEGRAM_TOKEN)
-    # send_welcome_message(bot)  # для прохождения тестов
+    # send_welcome_message(bot)  # Включить после прохождения тестов
     timestamp = int(time.time())
     last_message = ''
 
@@ -144,8 +143,8 @@ def main():
             if homeworks:
                 message = parse_status(homeworks[0])
                 if message != last_message:
-                    if send_message(bot, message):
-                        last_message = message
+                    send_message(bot, message)
+                    last_message = message
                 else:
                     logger.debug('Статус не изменился.')
             else:
@@ -155,8 +154,9 @@ def main():
             message = f'Сбой в работе программы: {error}'
             logger.error(message)
             if message != last_message:
-                if send_message(bot, message):
-                    last_message = message
+                with suppress(ApiException):
+                    send_message(bot, message)
+                last_message = message
         finally:
             time.sleep(RETRY_PERIOD)
 
