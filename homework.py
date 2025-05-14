@@ -55,7 +55,9 @@ def check_tokens():
         ) if not token
     ]
     if missing:
-        logger.critical(f'Отсутствуют переменные окружения: {", ".join(missing)}')
+        logger.critical(
+            f'Отсутствуют переменные окружения: {", ".join(missing)}'
+        )
         sys.exit(1)
 
 
